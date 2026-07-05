@@ -28,27 +28,37 @@ class Bloch:
     
    
 def to_bloch(g: np.ndarray) -> Bloch:
-    """Recover the Bloch form (alpha, n, theta) of a 2x2 unitary `g`."""
-    sigma = np.array([
-    [[0, 1], [1, 0]],       
-    [[0, -1j], [1j, 0]], 
-    [[1, 0], [0, -1]]       
-    ], dtype=DTYPE)
-    n: np.ndarray
-    
+    """Recover Bloch form of 2x2 unitary g."""
+
+    g = np.asarray(g, dtype=DTYPE)
 
     det_g = np.linalg.det(g)
-    alpha= float(0.5 * np.angle(det_g))
-    theta=float(2 * np.arccos(0.5 * np.trace(g/alpha)).real)
-    g_dash=g* np.exp(-1j* alpha)
-    if np.isclose(np.sin(theta/2), 0.0):
+    alpha = float(0.5 * np.angle(det_g))
+
+    # Remove global phase
+    g_dash = np.exp(-1j * alpha) * g
+
+    tr = np.trace(g_dash)
+    cos_half_theta = np.clip((0.5 * tr).real, -1.0, 1.0)
+
+    theta = float(2 * np.arccos(cos_half_theta))
+
+    s = np.sin(theta / 2)
+
+    if np.isclose(s, 0.0):
         n = np.array([0.0, 0.0, 1.0], dtype=float)
     else:
-        n_x=0.5j*np.trace(sigma[0]@g_dash)/np.sin(theta/2)
-        n_y=0.5j*np.trace(sigma[1]@g_dash)/np.sin(theta/2)
-        n_z=0.5j*np.trace(sigma[2]@g_dash)/np.sin(theta/2)
+        n_x = (0.5j * np.trace(sigma[0] @ g_dash) / s).real
+        n_y = (0.5j * np.trace(sigma[1] @ g_dash) / s).real
+        n_z = (0.5j * np.trace(sigma[2] @ g_dash) / s).real
+
         n = np.array([n_x, n_y, n_z], dtype=float)
-    return Bloch(alpha,n,theta)
+
+        norm = np.linalg.norm(n)
+        if not np.isclose(norm, 0.0):
+            n = n / norm
+
+    return Bloch(alpha, n, theta)
 
 
 # n1, n2 are two orthogonal Bloch-sphere axes (n1 . n2 == 0)
@@ -66,31 +76,33 @@ a3 = np.cross(a1, a2)
 
 
 def n1n2n1_angles(b: Bloch) -> tuple[float, float, float, float]:
-    """Factor the rotation part of a unitary (given as its Bloch form `b`) as
-        u = e^{i global_phase} * Rn1(alpha) * Rn2(beta) * Rn1(gamma)
+    """Factor Bloch rotation into Rn1(alpha) Rn2(beta) Rn1(gamma)."""
 
-    where Ra(angle) is a rotation by `angle` about axis a, and {a1, a2, a3} is
-    the orthonormal frame defined above. Returns (alpha, beta, gamma, global_phase).
-    """
-    # TODO(student): implement using the steps above.
-    global_phase=b.alpha
-    # z=np.sin(beta)*np.sin(gama-alpha)
-    # y=np.sin(beta)*np.cos(gama-alpha)
-    # x=np.cos(beta)*np.sin(gama+alpha)
-    # w=np.cos(beta)*np.cos(gama+alpha)
-    w=np.cos(b.theta/2)
-    x=np.sin(b.theta/2)*np.dot(b.n,a1)
-    y=np.sin(b.theta/2)*np.dot(b.n,a2)
-    z=np.sin(b.theta/2)*np.dot(b.n,a3)
-   # gama-alpha=np.arctan2(z/y)
-   # gama + alpha= np.arctan2(x/w)
-    gama= 0.5*(np.arctan2(z,y)+np.arctan2(x,w))
-    alpha= 0.5*(-np.arctan2(z,y)+np.arctan2(x,w))
-    beta=np.arcsin(z/np.sin(gama-alpha))
+    global_phase = b.alpha
+
+    w = np.cos(b.theta / 2)
+    x = np.sin(b.theta / 2) * np.dot(b.n, a1)
+    y = np.sin(b.theta / 2) * np.dot(b.n, a2)
+    z = np.sin(b.theta / 2) * np.dot(b.n, a3)
+
+    p = np.arctan2(z, y)  # gamma - alpha
+    q = np.arctan2(x, w)  # gamma + alpha
+
+    gamma = 0.5 * (p + q)
+    alpha = 0.5 * (q - p)
+
+    # Much safer than beta = arcsin(z / sin(...))
+    beta = np.arctan2(
+        np.sqrt(y * y + z * z),
+        np.sqrt(w * w + x * x),
+    )
+
     alpha = float(np.mod(alpha, TWO_PI))
     beta = float(np.mod(beta, TWO_PI))
-    gamma = float(np.mod(gama, TWO_PI))
-    return(alpha,beta,gamma,global_phase)
+    gamma = float(np.mod(gamma, TWO_PI))
+
+    return alpha, beta, gamma, global_phase
+
 
 
 def approx_angle_with_tolerance(angle: float, tolerance: float) -> int:
@@ -161,25 +173,29 @@ def decompose_2x2(u: np.ndarray, tolerance: float) -> tuple[int, int, int]:
     return(k,l,m)
     # TODO(student): implement using the steps above.
     raise NotImplementedError("decompose_2x2 is not implemented yet")
-sigma = np.array([
-    [[0, 1], [1, 0]],       
-    [[0, -1j], [1j, 0]], 
-    [[1, 0], [0, -1]]       
-    ], dtype=DTYPE)
+
+sigma = np.array(
+    [
+        [[0, 1], [1, 0]],
+        [[0, -1j], [1j, 0]],
+        [[1, 0], [0, -1]],
+    ],
+    dtype=DTYPE,
+)
+
 def from_axis_angle(b: Bloch) -> np.ndarray:
-    """Build a 2x2 unitary from its Bloch form: a global phase times a rotation
-    by angle b.theta about axis b.n (inverse of to_bloch).
+    """Build 2x2 unitary from Bloch form."""
 
-        G = e^{i b.alpha} (cos(b.theta/2) I - i sin(b.theta/2) (b.n . sigma))
+    n_dot_sigma = (
+        b.n[0] * sigma[0]
+        + b.n[1] * sigma[1]
+        + b.n[2] * sigma[2]
+    )
 
-    where (b.n . sigma) = n_x X + n_y Y + n_z Z. Assumes b.n is a unit vector.
-    """
-   
-    G=np.exp(1j*b.alpha)*(np.cos(0.5*b.theta)*np.eye-1j*np.sin(0.5*b.theta)*np.dot(b.n,sigma))
-    return G
-    # TODO: implement using the formula above.
-    raise NotImplementedError("from_axis_angle is not implemented yet")
-
+    return np.exp(1j * b.alpha) * (
+        np.cos(b.theta / 2) * np.eye(2, dtype=DTYPE)
+        - 1j * np.sin(b.theta / 2) * n_dot_sigma
+    )
 
 def Rz(theta: float) -> np.ndarray:
     return np.array(
@@ -282,19 +298,19 @@ M1_WORD = [7, 1, 1, 1]
 M2_WORD = [2, 1, 1, 1, 6, 1, 7, 1, 5, 1, 1, 1, 2, 1, 1, 1, 2, 1, 7, 1, 6]
 
 
+
 def expand_word(word: list[int]) -> str:
-    """Flatten an alternating (T-power, H-power, ...) exponent list into a literal
-    string of 'H'/'T' gates (left-to-right). Even indices are T, odd indices are H.
-    """
-    T="T"
-    H="H"
-    string=""
-    for i in range(len(word)):
-        if(i%2==0):
-            string=string+T*word[i]
+    """Flatten alternating T-power, H-power exponents."""
+
+    result = ""
+
+    for i, power in enumerate(word):
+        if i % 2 == 0:
+            result += "T" * power
         else:
-            string=string+H*word[i]
-    return string
+            result += "H" * power
+
+    return result
     # TODO: implement.
     raise NotImplementedError("expand_word is not implemented yet")
 
@@ -302,41 +318,61 @@ def expand_word(word: list[int]) -> str:
 # M1_STR = expand_word(M1_WORD)
 # M2_STR = expand_word(M2_WORD)
 
+M1_STR = expand_word(M1_WORD)
+M2_STR = expand_word(M2_WORD)
+
 
 def gates_to_unitary(gates: str) -> np.ndarray:
-    """The 2x2 unitary of a flat H/T gate string (left-to-right product)."""
-    T=np.array([[1,0],[0,np.exp(0.25j*np.pi)]],dtype=DTYPE)
-    aray=np.array([[1,0],[0,1]],dtype=DTYPE)
-    lis=list(gates)
-    for i in range(len(gates)):
-        if(lis[i]=='H'):
-            aray=aray@H
+    """The 2x2 unitary of a flat H/T gate string."""
+
+    T = np.array(
+        [
+            [1, 0],
+            [0, np.exp(1j * np.pi / 4)],
+        ],
+        dtype=DTYPE,
+    )
+
+    result = np.eye(2, dtype=DTYPE)
+
+    for ch in gates:
+        if ch == "H":
+            result = result @ H
+        elif ch == "T":
+            result = result @ T
         else:
-            aray=aray@T
-    return aray
+            raise ValueError(f"Unknown gate character: {ch}")
+
+    return result
+
     # TODO: implement (multiply H / T for each char, starting from I).
     raise NotImplementedError("gates_to_unitary is not implemented yet")
 
 
 def invert_gates(gates: str) -> str:
-    """Inverse of a flat H/T word: reverse the gate order and invert each gate.
-    H^-1 = H; the {H, T} basis has no T-dagger, so T^-1 must be spelled as T^7.
-    """
-    sring=gates[::-1]
-    sring = sring.replace('T', 'TTTTTTT')
-    return sring
+    """Inverse of H/T word."""
+
+    result = ""
+
+    for ch in reversed(gates):
+        if ch == "H":
+            result += "H"
+        elif ch == "T":
+            result += "T" * 7
+        else:
+            raise ValueError(f"Unknown gate character: {ch}")
+
+    return result
     # TODO: implement.
     raise NotImplementedError("invert_gates is not implemented yet")
 
 def power_gates(base: str, k: int) -> str:
-    """The k-th power of a flat H/T word: base repeated k times. Negative k uses the
-    inverse word (invert_gates).
-    """
-    if(k>=0):
-        base=base*k
-    else:
-        base=invert_gates(base)*-k
-    return base
+    """The k-th power of a flat H/T word."""
+
+    if k >= 0:
+        return base * k
+
+    return invert_gates(base) * (-k)
     # TODO: implement.
     raise NotImplementedError("power_gates is not implemented yet")
 
@@ -404,63 +440,16 @@ def error_up_to_phase_2x2(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def approximate_in_ht(u: np.ndarray, error: float) -> str:
-    """Approximate a 2x2 unitary using only H and T gates.
+    """Approximate a 2x2 unitary using H/T words.
 
-    This is a simple beam-search approximator.
-    Smaller error -> longer words -> more gates.
+    Uses:
+        U ≈ M1^k M2^l M1^m
     """
 
-    u = np.asarray(u, dtype=complex)
+    k, l, m = decompose_2x2(u, error)
 
-    if u.shape != (2, 2):
-        raise ValueError("u must be 2x2")
-
-    H = ht_matrix("H")
-    T = ht_matrix("T")
-
-    gates = [
-        ("H", H),
-        ("T", T),
-    ]
-
-    # Important scaling knob.
-    # Larger beam_width = better approximation but slower.
-    beam_width = 300
-
-    # Max depth grows as error gets smaller.
-    max_depth = int(np.ceil(12 * np.log2(1 / error))) + 5
-
-    candidates = [
-        ("", np.eye(2, dtype=complex))
-    ]
-
-    best_word = ""
-    best_err = error_up_to_phase_2x2(u, np.eye(2, dtype=complex))
-
-    for depth in range(1, max_depth + 1):
-        new_candidates = []
-
-        for word, mat in candidates:
-            for ch, G in gates:
-                new_word = word + ch
-                new_mat = mat @ G
-
-                err = error_up_to_phase_2x2(u, new_mat)
-
-                if err < best_err:
-                    best_err = err
-                    best_word = new_word
-
-                if err <= error:
-                    return new_word
-
-                new_candidates.append((new_word, new_mat, err))
-
-        # Keep only the best candidates.
-        new_candidates.sort(key=lambda x: x[2])
-        candidates = [
-            (word, mat)
-            for word, mat, err in new_candidates[:beam_width]
-        ]
-
-    return best_word
+    return (
+        power_gates(M1_STR, k)
+        + power_gates(M2_STR, l)
+        + power_gates(M1_STR, m)
+    )

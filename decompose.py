@@ -1172,15 +1172,9 @@ def ht_gates(n: int, qubit: int, word: str) -> Circuit:
     raise NotImplementedError("ht_gates is not implemented yet")
 
 
+
 def decompose_to_ht(u: np.ndarray, error: float) -> Circuit:
-    """Fully lower a Unitary to a Circuit of only H, T, and CNOT gates (the discrete
-    fault-tolerant basis): run decompose_to_basis, then replace each arbitrary
-    SingleQubitGate with its {H, T} word from rotation.approximate_in_ht (CNOTs pass
-    through). `error` is the per-gate angular tolerance (smaller -> longer, more
-    accurate). Each word matches its gate up to a global phase; those per-gate phases
-    factor out into one overall global phase, so the result reconstructs u up to
-    global phase (compare with error_up_to_phase).
-    """
+    """Fully lower a Unitary to a Circuit of only H, T, and CNOT gates."""
 
     basis_circuit = decompose_to_basis(u)
 
